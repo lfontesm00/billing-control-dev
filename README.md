@@ -63,3 +63,5 @@ Não execute migrations diretamente no dataset histórico sem validação. A ord
 ## Documentação
 
 Consulte [docs/manual-primeiros-passos.md](docs/manual-primeiros-passos.md) para configuração completa, Firebase, BigQuery, testes funcionais, diagnóstico e critérios de aceite.
+
+Para continuar o SaaS com as áreas de Consultas, Doutores e Financeiro, leia também o [mapeamento detalhado das tabelas e relacionamentos](docs/mapeamento-dados-saas.md).
