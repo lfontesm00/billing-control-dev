@@ -1,0 +1,21 @@
+.team-usage { display:flex; align-items:baseline; gap:10px; margin:20px 0; padding:18px 22px; background:#fff; border-radius:16px; box-shadow:0 2px 16px rgba(123,47,242,.08); }
+.team-usage strong { font-size:28px; color:var(--color-primary); }
+.team-usage span { color:var(--muted); }
+.team-list { display:grid; gap:14px; }
+.team-card { display:grid; grid-template-columns:1fr auto auto; gap:18px; align-items:center; padding:20px; border-radius:16px; background:#fff; box-shadow:0 2px 16px rgba(123,47,242,.08); }
+.team-card.inactive { opacity:.7; }
+.team-card > div:first-child { display:grid; gap:4px; }
+.team-card small,.team-card > div:first-child span { color:var(--muted); }
+.team-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.team-actions button,.temporary-password .modal-actions button { border:1px solid var(--line); background:#fff; color:var(--color-primary); border-radius:10px; padding:10px 12px; font-weight:700; cursor:pointer; }
+.team-actions button:disabled { opacity:.45; cursor:not-allowed; }
+.clinic-checks { border:1px solid var(--line); border-radius:12px; padding:14px; display:grid; gap:10px; }
+.clinic-checks legend { padding:0 6px; font-weight:700; }
+.clinic-checks label { display:flex; align-items:center; gap:8px; }
+.clinic-checks input { width:auto; }
+.modal-backdrop.top { z-index:50; }
+.temporary-password { max-width:520px; }
+.temporary-password label { display:grid; gap:6px; margin-top:14px; }
+.temporary-password input { width:100%; padding:12px; border:1px solid var(--line); border-radius:9px; }
+@media(max-width:800px) { .team-card { grid-template-columns:1fr; } .team-actions { justify-content:flex-start; } }
+body[data-can-approve="false"] .history-item .link-button { display:none; }

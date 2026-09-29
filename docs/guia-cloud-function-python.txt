@@ -1,0 +1,104 @@
+GUIA INICIAL PARA CRIAR UMA CLOUD FUNCTION 2ª GERAÇÃO COM PYTHON E FLASK
+
+OBJETIVO:
+Criar uma função simples, barata e funcional no Google Cloud, usando o projeto datalake-dev-clinica-control, sem precisar de servidor sempre ligado.
+
+PONTO DE PARTIDA:
+- Você já tem o projeto no GitHub.
+- Você já tem o SDK do Google Cloud instalado.
+- Você quer começar com algo simples e evitar custos.
+
+O QUE VOCÊ VAI PRECISAR
+- Python
+- Flask
+- Functions Framework
+- Google Cloud SDK
+- Um projeto no Google Cloud
+
+POR ONDE COMEÇAR
+Comece pela função mais simples possível: uma rota que responda "ok".
+
+1. CRIE O ARQUIVO main.py
+Use este conteúdo:
+
+import functions_framework
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+@functions_framework.http
+def importar_consultas(request):
+    return jsonify({"message": "Hello from Cloud Function"})
+
+2. CRIE O ARQUIVO requirements.txt
+Adicione:
+
+flask
+functions-framework
+
+3. TESTE LOCALMENTE
+No terminal, rode:
+
+pip install -r requirements.txt
+
+Depois teste com:
+
+python main.py
+
+Ou com:
+
+functions-framework --target importar_consultas
+
+4. CONFIGURE O PROJETO NO GOOGLE CLOUD
+Use o projeto:
+
+datalake-dev-clinica-control
+
+No Google Cloud Console, ative:
+- Cloud Functions API
+- Cloud Build API
+- Artifact Registry
+- Logging
+
+5. FAÇA O DEPLOY
+No terminal, primeiro selecione o projeto:
+
+gcloud config set project datalake-dev-clinica-control
+
+Depois faça o deploy em uma única linha:
+
+gcloud functions deploy importar-consultas --gen2 --runtime=python311 --region=southamerica-east1 --source=. --entry-point=importar_consultas --trigger-http --allow-unauthenticated
+
+6. TESTE A URL GERADA
+Depois do deploy, o Google Cloud vai te fornecer uma URL.
+Acesse essa URL no navegador.
+
+7. COMO EVITAR CUSTOS
+Para não gastar muito:
+- comece com uma função simples
+- não use serviços caros no começo
+- evite lógica pesada
+- não faça chamadas frequentes
+- teste tudo localmente antes de publicar
+
+8. PRÓXIMO PASSO
+Depois que essa função funcionar, você pode evoluir para:
+- uma rota /health
+- uma rota /pacientes
+- integração com BigQuery
+- autenticação
+
+9. CHECKLIST BÁSICO
+- [ ] criar main.py
+- [ ] criar requirements.txt
+- [ ] instalar dependências
+- [ ] testar localmente
+- [ ] fazer deploy na Cloud Function
+- [ ] testar a URL
+
+RESUMO
+Se você é iniciante, o melhor caminho é simples: criar uma função mínima, testar localmente, fazer deploy e só depois adicionar mais recursos.
