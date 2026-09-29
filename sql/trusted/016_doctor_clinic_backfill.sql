@@ -2,15 +2,20 @@
 -- Idempotent backfill of tb_trat_billing_control_doutor_clinica.
 -- DO NOT EXECUTE without running 015_doctor_preflight.sql first and obtaining explicit authorization.
 --
+-- Schema confirmed (2026-09-29): data_inicio is DATETIME, data_fim is DATE.
+-- Cast DATE → DATETIME where required.
+--
 -- Strategy:
 --   Wave 1 — insert pairs derived from doutores.id_clinica (historical origin field).
 --   Wave 2 — insert pairs observed in consultas not yet covered by wave 1 or existing records.
+--             (In the current dataset, Wave 2 inserts 0 rows; all pairs are covered by Wave 1.)
 --
 -- Both waves use MERGE to guarantee idempotency: re-running this script is safe.
 -- No existing record is deleted, updated, or overwritten.
--- data_inicio is set to the earliest known consulta date for wave-2 pairs; otherwise CURRENT_DATE().
+-- data_inicio for Wave 1: DATETIME(CURRENT_DATE()) — no historical date available from doutores.
+-- data_inicio for Wave 2: DATETIME(MIN(c.data_consulta)) — earliest known consultation date.
 -- Rollback plan: there is no physical rollback for BigQuery INSERT/MERGE without a snapshot.
---   To undo: DELETE FROM doutor_clinica WHERE origem_registro='BACKFILL_2026' -- logical rollback.
+--   To undo: DELETE FROM doutor_clinica WHERE created_at > '<timestamp_before_backfill>'
 --   Record counts before and after are captured by 015_doctor_preflight and 017_doctor_clinic_reconciliation.
 
 -- Wave 1: pairs from doutores.id_clinica missing in doutor_clinica.
@@ -21,8 +26,8 @@ USING (
     d.id_doutor,
     d.id_clinica,
     d.nome_doutor,
-    CURRENT_DATE() AS data_inicio,
-    NULL AS data_fim,
+    DATETIME(CURRENT_DATE()) AS data_inicio,
+    CAST(NULL AS DATE) AS data_fim,
     d.flag_ativo
   FROM `datalake-dev-clinica-control.dataset_dev_trusted_clinica_validacao.tb_trat_billing_control_doutores` d
   WHERE d.id_clinica IS NOT NULL
@@ -50,8 +55,8 @@ USING (
     c.id_doutor,
     c.id_clinica,
     d.nome_doutor,
-    MIN(c.data_consulta) AS data_inicio,
-    NULL AS data_fim,
+    DATETIME(MIN(c.data_consulta)) AS data_inicio,
+    CAST(NULL AS DATE) AS data_fim,
     COALESCE(d.flag_ativo, TRUE) AS flag_ativo
   FROM `datalake-dev-clinica-control.dataset_dev_trusted_clinica_validacao.tb_trat_billing_control_consultas` c
   LEFT JOIN `datalake-dev-clinica-control.dataset_dev_trusted_clinica_validacao.tb_trat_billing_control_doutores` d
