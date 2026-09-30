@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from app.config import settings
 from app.core import BusinessError, CurrentUser, create_firebase_user, delete_firebase_user, get_current_user, reset_firebase_password
-from app.models.mvp import AnamnesisSubmit, ClinicCreate, InviteCreate, OrganizationCreate, PasswordChange, PatientCreate, PatientSessionCreate, ProfessionalApproval, RemoteIdentityVerify, RemotePatientSessionCreate, TeamMemberCreate, TeamMemberUpdate, PaginatedDoctors, DoctorDetail, PaginatedConsultations, ConsultationDetail
+from app.models.mvp import AnamnesisSubmit, ClinicCreate, InviteCreate, OrganizationCreate, PasswordChange, PatientCreate, PatientSessionCreate, ProfessionalApproval, RemoteIdentityVerify, RemotePatientSessionCreate, TeamMemberCreate, TeamMemberUpdate, PaginatedDoctors, DoctorDetail, PaginatedConsultations, ConsultationDetail, FinancialSummary, PaginatedExpenses
 from app.services.mvp import anamnesis_status, form_is_available
 from app.repositories.mvp import BigQueryMvpRepository
 from app.services.mvp import MvpService
@@ -340,6 +340,16 @@ def submit_patient_anamnesis(payload: AnamnesisSubmit, request:Request, context:
     result = svc.submit_anamnesis(None, session["id_clinica"], session["id_paciente"], payload, patient_session=True,form_id=session.get("id_formulario"))
     if session.get("tipo_sessao")=="REMOTE": return repo.finalize_remote_submission(token,session,result,payload.model_dump(mode="json"),*request_evidence(request))
     repo.consume_patient_session(token);return result
+
+
+@router.get("/clinicas/{clinic_id}/financeiro/resumo", response_model=FinancialSummary, tags=["financeiro"])
+def financial_summary(clinic_id: int, mes_ano: str = Query(default=""), user: CurrentUser = Depends(get_current_user), svc: MvpService = Depends(service)):
+    return svc.get_financial_summary(user, clinic_id, mes_ano or None)
+
+
+@router.get("/clinicas/{clinic_id}/financeiro/despesas", response_model=PaginatedExpenses, tags=["financeiro"])
+def list_expenses(clinic_id: int, mes_ano: str = Query(default=""), page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100), user: CurrentUser = Depends(get_current_user), svc: MvpService = Depends(service)):
+    return svc.list_expenses(user, clinic_id, mes_ano or None, page, page_size)
 
 
 @router.get("/clinicas/{clinic_id}/consultas", response_model=PaginatedConsultations, tags=["consultas"])

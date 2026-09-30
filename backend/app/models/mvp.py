@@ -310,3 +310,35 @@ class ConsultationDetail(ConsultationListItem):
     tipo_match_paciente: str | None = None
     nome_paciente_origem: str | None = None
     itens: list[ConsultationProcedure] = []
+
+
+class ExpenseListItem(ApiModel):
+    id_despesa: int
+    id_clinica: int
+    nome_despesa: str | None = None
+    prestador: str | None = None
+    data_vencimento: date | None = None
+    mes_ano: str | None = None
+    status: str | None = None
+    valor_despesa: float | None = None
+    data_pagamento: date | None = None
+
+
+class PaginatedExpenses(ApiModel):
+    items: list[ExpenseListItem]
+    page: int
+    page_size: int
+    total: int
+
+
+class FinancialSummary(ApiModel):
+    producao_estimada: float
+    total_despesas: float
+    resultado_estimado: float
+    total_consultas: int
+    total_despesas_count: int
+    aviso: str = (
+        "Resultado operacional estimado. "
+        "Producao reflete valor_total de consultas finalizadas, "
+        "nao confirma recebimento. Despesas incluem todos os registros do periodo."
+    )

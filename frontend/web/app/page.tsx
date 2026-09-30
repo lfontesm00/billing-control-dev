@@ -150,7 +150,27 @@ type ConsultationDetail = Consultation & {
   nome_paciente_origem: string | null;
   itens: ConsultationProcedure[];
 };
-type NavigationScreen = "overview" | "patients" | "anamneses" | "team" | "doctors" | "consultations";
+type Expense = {
+  id_despesa: number;
+  id_clinica: number;
+  nome_despesa: string | null;
+  prestador: string | null;
+  data_vencimento: string | null;
+  mes_ano: string | null;
+  status: string | null;
+  valor_despesa: number | null;
+  data_pagamento: string | null;
+};
+type ExpenseResult = { items: Expense[]; total: number; page: number; page_size: number };
+type FinancialSummary = {
+  producao_estimada: number;
+  total_despesas: number;
+  resultado_estimado: number;
+  total_consultas: number;
+  total_despesas_count: number;
+  aviso: string;
+};
+type NavigationScreen = "overview" | "patients" | "anamneses" | "team" | "doctors" | "consultations" | "financeiro";
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -196,6 +216,11 @@ export default function Home() {
   const [consultationDateTo, setConsultationDateTo] = useState("");
   const [consultationDoctorId, setConsultationDoctorId] = useState<number | null>(null);
   const [consultationDetail, setConsultationDetail] = useState<ConsultationDetail | null>(null);
+  const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
+  const [expenses, setExpenses] = useState<ExpenseResult>({ items: [], total: 0, page: 1, page_size: 25 });
+  const [expenseCache, setExpenseCache] = useState<Record<string, ExpenseResult>>({});
+  const [expensePage, setExpensePage] = useState(1);
+  const [financeMesAno, setFinanceMesAno] = useState("");
 
   useEffect(() => {
     if (window.location.pathname === "/anamnese/responder") {
@@ -404,6 +429,11 @@ export default function Home() {
     setConsultationDateTo("");
     setConsultationDoctorId(null);
     setConsultationDetail(null);
+    setFinancialSummary(null);
+    setExpenses({ items: [], total: 0, page: 1, page_size: 25 });
+    setExpenseCache({});
+    setExpensePage(1);
+    setFinanceMesAno("");
     setScreen("login");
   }
   async function loadDoctorList(targetClinic: typeof clinic, search: string, active: ActiveFilter, page: number) {
@@ -443,6 +473,30 @@ export default function Home() {
     if (!clinic) return;
     await loadConsultationList(clinic, consultationSearch, consultationDateFrom, consultationDateTo, consultationDoctorId, consultationPage);
     setScreen("consultations");
+  }
+  async function loadFinanceiro(targetClinic: typeof clinic, mesAno: string, page: number) {
+    if (!targetClinic) return;
+    const cacheKey = `${targetClinic.id_clinica}:${mesAno}:${page}`;
+    const summaryParams = mesAno ? `?mes_ano=${encodeURIComponent(mesAno)}` : "";
+    const expenseParams = new URLSearchParams({ page: String(page), page_size: "25" });
+    if (mesAno) expenseParams.set("mes_ano", mesAno);
+    if (expenseCache[cacheKey]) setExpenses(expenseCache[cacheKey]);
+    await run(
+      () => Promise.all([
+        api<FinancialSummary>(`/clinicas/${targetClinic.id_clinica}/financeiro/resumo${summaryParams}`),
+        api<ExpenseResult>(`/clinicas/${targetClinic.id_clinica}/financeiro/despesas?${expenseParams}`),
+      ]),
+      ([summary, expResult]) => {
+        setFinancialSummary(summary);
+        setExpenses(expResult);
+        setExpenseCache((prev) => ({ ...prev, [cacheKey]: expResult }));
+      },
+    );
+  }
+  async function openFinanceiro() {
+    if (!clinic) return;
+    await loadFinanceiro(clinic, financeMesAno, expensePage);
+    setScreen("financeiro");
   }
   async function openTeam() {
     await run(
@@ -582,6 +636,10 @@ export default function Home() {
       void openConsultations();
       return;
     }
+    if (destination === "financeiro") {
+      void openFinanceiro();
+      return;
+    }
     setTransitioning(true);
     window.setTimeout(() => {
       setScreen(destination);
@@ -609,6 +667,35 @@ export default function Home() {
         onClinics={() => setScreen("clinics")}
         onLogout={leave}
         run={run}
+      />
+    );
+  if (screen === "financeiro" && financialSummary)
+    return (
+      <FinanceiroPage
+        user={user}
+        identity={identity}
+        clinic={clinic}
+        clinics={clinics}
+        summary={financialSummary}
+        expenses={expenses}
+        mesAno={financeMesAno}
+        setMesAno={setFinanceMesAno}
+        page={expensePage}
+        error={error}
+        loading={loading}
+        onNavigate={navigate}
+        onClinicSelect={chooseClinic}
+        onClinics={() => setScreen("clinics")}
+        onLogout={leave}
+        onFilter={() => {
+          setExpenseCache({});
+          setExpensePage(1);
+          void loadFinanceiro(clinic, financeMesAno, 1);
+        }}
+        onPage={(page) => {
+          setExpensePage(page);
+          void loadFinanceiro(clinic, financeMesAno, page);
+        }}
       />
     );
   if (screen === "consultations")
@@ -703,7 +790,7 @@ export default function Home() {
         onCloseDetail={() => setDoctorDetail(null)}
       />
     );
-  const dashboardScreen: Exclude<NavigationScreen, "team" | "doctors" | "consultations"> =
+  const dashboardScreen: Exclude<NavigationScreen, "team" | "doctors" | "consultations" | "financeiro"> =
     screen === "overview" || screen === "anamneses" ? screen : "patients";
   return (
     <Dashboard
@@ -1161,6 +1248,7 @@ function AppSidebar({
   const canReadAnamnesis = Boolean(identity?.permissoes.includes("ANAMNESIS_READ"));
   const canReadDoctors = Boolean(identity?.permissoes.includes("DOCTOR_READ"));
   const canReadConsultations = Boolean(identity?.permissoes.includes("CONSULTATION_READ"));
+  const canReadFinance = Boolean(identity?.permissoes.includes("FINANCE_READ"));
   const item = (screen: NavigationScreen, icon: string, label: string) => (
     <button
       type="button"
@@ -1203,6 +1291,7 @@ function AppSidebar({
         {canReadAnamnesis && item("anamneses", "✚", "Anamneses")}
         {canReadDoctors && item("doctors", "♞", "Doutores")}
         {canReadConsultations && item("consultations", "✦", "Consultas")}
+        {canReadFinance && item("financeiro", "₢", "Financeiro")}
         {canManageTeam && item("team", "♧", "Equipe")}
       </nav>
       {identity?.permissoes.includes("CLINIC_MANAGE") && (
@@ -1568,7 +1657,7 @@ function TemporaryPassword({
 }
 
 function Dashboard(props: {
-  view: Exclude<NavigationScreen, "team" | "doctors" | "consultations">;
+  view: Exclude<NavigationScreen, "team" | "doctors" | "consultations" | "financeiro">;
   user: User | null;
   identity: Identity | null;
   clinic: Clinic | null;
@@ -2414,6 +2503,158 @@ function RemoteAnamnesis({ token }: { token: string }) {
         }
       }}
     />
+  );
+}
+function FinanceiroPage({
+  user,
+  identity,
+  clinic,
+  clinics,
+  summary,
+  expenses,
+  mesAno,
+  setMesAno,
+  page,
+  error,
+  loading,
+  onNavigate,
+  onClinicSelect,
+  onClinics,
+  onLogout,
+  onFilter,
+  onPage,
+}: {
+  user: User | null;
+  identity: Identity | null;
+  clinic: Clinic | null;
+  clinics: Clinic[];
+  summary: FinancialSummary;
+  expenses: ExpenseResult;
+  mesAno: string;
+  setMesAno: (s: string) => void;
+  page: number;
+  error: string;
+  loading: boolean;
+  onNavigate: (screen: NavigationScreen) => void;
+  onClinicSelect: (clinic: Clinic) => void;
+  onClinics: () => void;
+  onLogout: () => void;
+  onFilter: () => void;
+  onPage: (page: number) => void;
+}) {
+  const pages = Math.max(1, Math.ceil(expenses.total / expenses.page_size));
+  const fmtCurrency = (v: number | null | undefined) =>
+    v == null ? "—" : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const fmtDate = (s: string | null) =>
+    s ? new Date(s + "T00:00:00").toLocaleDateString("pt-BR") : "—";
+  const resultadoPositivo = summary.resultado_estimado >= 0;
+  return (
+    <main className="app-shell">
+      <BusyOverlay visible={loading} message="Carregando" />
+      <AppSidebar current="financeiro" identity={identity} clinic={clinic} clinics={clinics} onNavigate={onNavigate} onClinicSelect={onClinicSelect} onClinics={onClinics} />
+      <section className="workspace">
+        <header className="topbar">
+          <div className="topbar-context">
+            <small>Visão financeira</small>
+            <strong>{clinic?.nome}</strong>
+          </div>
+          <div className="topbar-user">
+            <strong>{user?.email}</strong>
+            <button className="logout-button" onClick={onLogout}>Sair</button>
+          </div>
+        </header>
+        <main className="main-content">
+          <div className="content">
+            <div className="title-row">
+              <div>
+                <p className="eyebrow">FINANCEIRO</p>
+                <h1>Resumo operacional</h1>
+                <p className="subtitle">Estimativa de produção e despesas — não confirma caixa ou lucro contábil.</p>
+              </div>
+            </div>
+            {error && <div className="error-box" role="alert">{error}</div>}
+            <div className="notice-box" role="note" style={{ marginBottom: "1rem" }}>
+              <strong>Aviso:</strong> {summary.aviso}
+            </div>
+            <div className="directory-tools">
+              <form className="panel-toolbar" onSubmit={(e) => { e.preventDefault(); onFilter(); }}>
+                <label>
+                  <span className="sr-only">Período (AAAA-MM)</span>
+                  <input
+                    type="month"
+                    value={mesAno}
+                    onChange={(e) => setMesAno(e.target.value)}
+                    title="Filtrar por mês (deixe vazio para todos os períodos)"
+                    placeholder="AAAA-MM"
+                  />
+                </label>
+                <button className="filter-button">Filtrar</button>
+              </form>
+            </div>
+            <div className="stats-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1rem", marginBottom: "1.5rem" }}>
+              <div className="stat-card">
+                <p className="eyebrow">PRODUÇÃO ESTIMADA</p>
+                <p className="stat-value">{fmtCurrency(summary.producao_estimada)}</p>
+                <small>{summary.total_consultas} consulta(s) finalizada(s)</small>
+              </div>
+              <div className="stat-card">
+                <p className="eyebrow">DESPESAS</p>
+                <p className="stat-value">{fmtCurrency(summary.total_despesas)}</p>
+                <small>{summary.total_despesas_count} registro(s)</small>
+              </div>
+              <div className={`stat-card${resultadoPositivo ? "" : " danger"}`}>
+                <p className="eyebrow">RESULTADO ESTIMADO</p>
+                <p className={`stat-value${resultadoPositivo ? " ok-text" : " danger-text"}`}>{fmtCurrency(summary.resultado_estimado)}</p>
+                <small>Produção − Despesas</small>
+              </div>
+            </div>
+            <div className="title-row" style={{ marginTop: "1rem" }}>
+              <div>
+                <h2>Despesas</h2>
+              </div>
+            </div>
+            <div className="directory-summary">
+              <strong>{expenses.total}</strong> despesa(s) encontrada(s)
+              <span>Página {expenses.page} de {pages}</span>
+            </div>
+            <div className="table-head" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr" }}>
+              <span>Despesa / Prestador</span>
+              <span>Competência</span>
+              <span>Vencimento</span>
+              <span>Status</span>
+              <span>Valor</span>
+            </div>
+            {expenses.items.length === 0 && !loading ? (
+              <div className="empty-state">
+                <strong>Nenhuma despesa encontrada</strong>
+                <span>Ajuste o período ou verifique os registros da clínica.</span>
+              </div>
+            ) : (
+              expenses.items.map((e) => (
+                <article className="patient-row" key={e.id_despesa}>
+                  <div className="patient-name">
+                    <div>
+                      <strong>{e.nome_despesa || "—"}</strong>
+                      <small>{e.prestador || "Sem prestador"}</small>
+                    </div>
+                  </div>
+                  <span>{e.mes_ano || "—"}</span>
+                  <span>{fmtDate(e.data_vencimento)}</span>
+                  <span className={`status ${e.status === "OK" ? "ok" : "warn"}`}>{e.status || "—"}</span>
+                  <span>{fmtCurrency(e.valor_despesa)}</span>
+                </article>
+              ))
+            )}
+            <div className="pagination">
+              <button disabled={expenses.page <= 1} onClick={() => onPage(expenses.page - 1)}>← Anterior</button>
+              <span>Página {expenses.page} de {pages}</span>
+              <button disabled={expenses.page >= pages} onClick={() => onPage(expenses.page + 1)}>Próxima →</button>
+            </div>
+          </div>
+        </main>
+        <footer className="footer">Billing Control • Gestão odontológica segura</footer>
+      </section>
+    </main>
   );
 }
 function ConsultasPage({

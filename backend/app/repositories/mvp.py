@@ -631,6 +631,73 @@ class BigQueryMvpRepository:
         digest = hashlib.sha256(raw.encode()).hexdigest()
         self._query(f"UPDATE {self._bc('sessoes_paciente')} SET revogada_em=CURRENT_TIMESTAMP() WHERE token_hash=@hash AND NOT usada AND revogada_em IS NULL", self._params(hash=("STRING", digest)))
 
+    def get_financial_summary(self, clinic_id: int, mes_ano: str | None = None) -> dict:
+        params = self._params(clinic=("INT64", clinic_id))
+        periodo_consultas = "AND mes_consulta = @mes_ano" if mes_ano else ""
+        periodo_despesas = "AND mes_ano = @mes_ano" if mes_ano else ""
+        if mes_ano:
+            params.append(bigquery.ScalarQueryParameter("mes_ano", "STRING", mes_ano))
+        result = self._one(self._query(f"""
+          WITH consultas AS (
+            SELECT COALESCE(valor_total, 0) valor_total
+            FROM {self._trusted('consultas')}
+            WHERE id_clinica = @clinic AND status = 'FINALIZADA'
+            {periodo_consultas}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_consulta ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          despesas AS (
+            SELECT COALESCE(valor_despesa, 0) valor_despesa
+            FROM {self._trusted('despesas')}
+            WHERE id_clinica = @clinic
+            {periodo_despesas}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_despesa ORDER BY updated_at DESC, created_at DESC) = 1
+          )
+          SELECT
+            COALESCE(SUM(c.valor_total), 0) producao_estimada,
+            COUNT(c.valor_total) total_consultas,
+            COALESCE((SELECT SUM(d.valor_despesa) FROM despesas d), 0) total_despesas,
+            COALESCE((SELECT COUNT(*) FROM despesas), 0) total_despesas_count
+          FROM consultas c
+        """, params))
+        if not result:
+            return {"producao_estimada": 0.0, "total_despesas": 0.0, "resultado_estimado": 0.0, "total_consultas": 0, "total_despesas_count": 0}
+        producao = float(result.get("producao_estimada") or 0)
+        despesas = float(result.get("total_despesas") or 0)
+        return {
+            "producao_estimada": producao,
+            "total_despesas": despesas,
+            "resultado_estimado": producao - despesas,
+            "total_consultas": int(result.get("total_consultas") or 0),
+            "total_despesas_count": int(result.get("total_despesas_count") or 0),
+        }
+
+    def list_expenses(self, clinic_id: int, mes_ano: str | None = None, page: int = 1, page_size: int = 25) -> dict:
+        params = self._params(clinic=("INT64", clinic_id), limit=("INT64", page_size), offset=("INT64", (page - 1) * page_size))
+        periodo = "AND mes_ano = @mes_ano" if mes_ano else ""
+        if mes_ano:
+            params.append(bigquery.ScalarQueryParameter("mes_ano", "STRING", mes_ano))
+        result = self._one(self._query(f"""
+          WITH base AS (
+            SELECT id_despesa, id_clinica, nome_despesa, prestador,
+              data_vencimento, CAST(mes_ano AS STRING) mes_ano,
+              status, valor_despesa, data_pagamento
+            FROM {self._trusted('despesas')}
+            WHERE id_clinica = @clinic
+            {periodo}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_despesa ORDER BY updated_at DESC, created_at DESC) = 1
+          )
+          SELECT
+            (SELECT COUNT(*) FROM base) total,
+            ARRAY(SELECT AS STRUCT id_despesa, id_clinica, nome_despesa, prestador,
+              data_vencimento, mes_ano, status, valor_despesa, data_pagamento
+              FROM base ORDER BY data_vencimento DESC, id_despesa DESC
+              LIMIT @limit OFFSET @offset) items
+        """, params))
+        if not result:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        rows = [dict(row.items()) if hasattr(row, "items") else dict(row) for row in (result.get("items") or [])]
+        return {"items": rows, "total": int(result.get("total") or 0), "page": page, "page_size": page_size}
+
     def list_consultations(self, clinic_id: int, search: str = "", date_from: str | None = None, date_to: str | None = None, doctor_id: int | None = None, status: str | None = None, page: int = 1, page_size: int = 25) -> dict:
         filters = []
         params = self._params(clinic=("INT64", clinic_id), search=("STRING", search), limit=("INT64", page_size), offset=("INT64", (page - 1) * page_size))
