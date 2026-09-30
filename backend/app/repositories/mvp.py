@@ -631,6 +631,130 @@ class BigQueryMvpRepository:
         digest = hashlib.sha256(raw.encode()).hexdigest()
         self._query(f"UPDATE {self._bc('sessoes_paciente')} SET revogada_em=CURRENT_TIMESTAMP() WHERE token_hash=@hash AND NOT usada AND revogada_em IS NULL", self._params(hash=("STRING", digest)))
 
+    def list_consultations(self, clinic_id: int, search: str = "", date_from: str | None = None, date_to: str | None = None, doctor_id: int | None = None, status: str | None = None, page: int = 1, page_size: int = 25) -> dict:
+        filters = []
+        params = self._params(clinic=("INT64", clinic_id), search=("STRING", search), limit=("INT64", page_size), offset=("INT64", (page - 1) * page_size))
+        if date_from:
+            filters.append("AND c.data_consulta >= @date_from")
+            params.append(bigquery.ScalarQueryParameter("date_from", "DATE", date_from))
+        if date_to:
+            filters.append("AND c.data_consulta <= @date_to")
+            params.append(bigquery.ScalarQueryParameter("date_to", "DATE", date_to))
+        if doctor_id is not None:
+            filters.append("AND c.id_doutor = @doctor_id")
+            params.append(bigquery.ScalarQueryParameter("doctor_id", "INT64", doctor_id))
+        if status:
+            filters.append("AND c.status = @status")
+            params.append(bigquery.ScalarQueryParameter("status", "STRING", status))
+        extra = "\n".join(filters)
+        result = self._one(self._query(f"""
+          WITH consultas AS (
+            SELECT * FROM {self._trusted('consultas')}
+            WHERE id_clinica = @clinic
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_consulta ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          pacientes AS (
+            SELECT * FROM {self._trusted('pacientes')}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_paciente ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          doutores AS (
+            SELECT * FROM {self._trusted('doutores')}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_doutor ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          itens AS (
+            SELECT id_consulta, id_clinica, COUNT(*) total_itens, SUM(valor_consulta) soma_itens
+            FROM {self._trusted('consulta_procedimentos')}
+            WHERE id_clinica = @clinic
+            GROUP BY id_consulta, id_clinica
+          ),
+          base AS (
+            SELECT
+              c.id_consulta, c.id_clinica, c.id_paciente, c.id_doutor,
+              COALESCE(p.nome_paciente, c.nome_paciente_origem) nome_paciente,
+              COALESCE(d.nome_doutor, c.nome_doutor) nome_doutor,
+              d.especialidade,
+              c.data_consulta, c.status, c.valor_total,
+              COALESCE(i.total_itens, 0) total_itens,
+              i.soma_itens,
+              c.flag_paciente_localizado,
+              (c.valor_total IS NOT NULL AND i.soma_itens IS NOT NULL
+               AND ROUND(CAST(c.valor_total AS NUMERIC), 2) != ROUND(CAST(i.soma_itens AS NUMERIC), 2)) divergencia_valor
+            FROM consultas c
+            LEFT JOIN pacientes p ON p.id_paciente = c.id_paciente
+            LEFT JOIN doutores d ON d.id_doutor = c.id_doutor
+            LEFT JOIN itens i ON i.id_consulta = c.id_consulta AND i.id_clinica = c.id_clinica
+            WHERE (@search = '' OR CONTAINS_SUBSTR(
+              LOWER(COALESCE(p.nome_paciente, c.nome_paciente_origem, '')), LOWER(@search)))
+            {extra}
+          )
+          SELECT
+            (SELECT COUNT(*) FROM base) total,
+            ARRAY(SELECT AS STRUCT id_consulta, id_clinica, id_paciente, id_doutor,
+              nome_paciente, nome_doutor, especialidade, data_consulta, status, valor_total,
+              total_itens, soma_itens, flag_paciente_localizado, divergencia_valor
+              FROM base ORDER BY data_consulta DESC, id_consulta DESC
+              LIMIT @limit OFFSET @offset) items
+        """, params))
+        if not result:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        rows = [dict(row.items()) if hasattr(row, "items") else dict(row) for row in (result.get("items") or [])]
+        return {"items": rows, "total": int(result.get("total") or 0), "page": page, "page_size": page_size}
+
+    def get_consultation(self, clinic_id: int, consultation_id: int) -> dict | None:
+        row = self._one(self._query(f"""
+          WITH consultas AS (
+            SELECT * FROM {self._trusted('consultas')}
+            WHERE id_clinica = @clinic
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_consulta ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          pacientes AS (
+            SELECT * FROM {self._trusted('pacientes')}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_paciente ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          doutores AS (
+            SELECT * FROM {self._trusted('doutores')}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_doutor ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          itens_agg AS (
+            SELECT id_consulta, id_clinica, COUNT(*) total_itens, SUM(valor_consulta) soma_itens
+            FROM {self._trusted('consulta_procedimentos')}
+            WHERE id_clinica = @clinic AND id_consulta = @consultation
+            GROUP BY id_consulta, id_clinica
+          ),
+          itens_list AS (
+            SELECT id_consulta_procedimento, COALESCE(nome_procedimento_tratado, nome_procedimento_original) nome_procedimento,
+              elemento_dental, descricao, valor_consulta
+            FROM {self._trusted('consulta_procedimentos')}
+            WHERE id_clinica = @clinic AND id_consulta = @consultation
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_consulta_procedimento ORDER BY updated_at DESC, created_at DESC) = 1
+          )
+          SELECT
+            c.id_consulta, c.id_clinica, c.id_paciente, c.id_doutor,
+            COALESCE(p.nome_paciente, c.nome_paciente_origem) nome_paciente,
+            COALESCE(d.nome_doutor, c.nome_doutor) nome_doutor,
+            d.especialidade,
+            c.data_consulta, c.status, c.valor_total,
+            COALESCE(a.total_itens, 0) total_itens,
+            a.soma_itens,
+            c.flag_paciente_localizado,
+            c.tipo_match_paciente,
+            c.nome_paciente_origem,
+            (c.valor_total IS NOT NULL AND a.soma_itens IS NOT NULL
+             AND ROUND(CAST(c.valor_total AS NUMERIC), 2) != ROUND(CAST(a.soma_itens AS NUMERIC), 2)) divergencia_valor,
+            ARRAY(SELECT AS STRUCT id_consulta_procedimento, nome_procedimento, elemento_dental, descricao, valor_consulta FROM itens_list ORDER BY id_consulta_procedimento) itens
+          FROM consultas c
+          LEFT JOIN pacientes p ON p.id_paciente = c.id_paciente
+          LEFT JOIN doutores d ON d.id_doutor = c.id_doutor
+          LEFT JOIN itens_agg a ON a.id_consulta = c.id_consulta AND a.id_clinica = c.id_clinica
+          WHERE c.id_consulta = @consultation
+          LIMIT 1
+        """, self._params(clinic=("INT64", clinic_id), consultation=("INT64", consultation_id))))
+        if not row:
+            return None
+        itens_raw = row.get("itens") or []
+        row["itens"] = [dict(i.items()) if hasattr(i, "items") else dict(i) for i in itens_raw]
+        return row
+
     def list_doctors(self, clinic_id: int, search: str = "", active: bool | None = None, page: int = 1, page_size: int = 25) -> dict:
         active_sql = "" if active is None else "AND COALESCE(dc.flag_ativo, d.flag_ativo, TRUE) = @active"
         params = self._params(clinic=("INT64", clinic_id), search=("STRING", search), limit=("INT64", page_size), offset=("INT64", (page - 1) * page_size))

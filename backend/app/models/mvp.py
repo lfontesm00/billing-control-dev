@@ -272,3 +272,41 @@ class DoctorDetail(DoctorListItem):
     id_clinica: int
     data_inicio: datetime | None = None
     data_fim: date | None = None
+
+
+class ConsultationProcedure(ApiModel):
+    id_consulta_procedimento: int
+    nome_procedimento: str | None = None
+    elemento_dental: str | None = None
+    descricao: str | None = None
+    valor_consulta: float | None = None
+
+
+class ConsultationListItem(ApiModel):
+    id_consulta: int
+    id_clinica: int
+    id_paciente: int | None = None
+    id_doutor: int | None = None
+    nome_paciente: str | None = None
+    nome_doutor: str | None = None
+    especialidade: str | None = None
+    data_consulta: date | None = None
+    status: str | None = None
+    valor_total: float | None = None
+    total_itens: int = 0
+    soma_itens: float | None = None
+    flag_paciente_localizado: bool | None = None
+    divergencia_valor: bool = False
+
+
+class PaginatedConsultations(ApiModel):
+    items: list[ConsultationListItem]
+    page: int
+    page_size: int
+    total: int
+
+
+class ConsultationDetail(ConsultationListItem):
+    tipo_match_paciente: str | None = None
+    nome_paciente_origem: str | None = None
+    itens: list[ConsultationProcedure] = []

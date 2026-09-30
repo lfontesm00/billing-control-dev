@@ -21,6 +21,8 @@ class MvpRepository(Protocol):
     def link_patient(self, patient_id: int, clinic_id: int, actor_id: int) -> dict: ...
     def get_form(self, clinic_id: int) -> dict | None: ...
     def submit_anamnesis(self, clinic_id: int, patient_id: int, data: dict, actor_id: int | None) -> dict: ...
+    def list_consultations(self, clinic_id: int, search: str, date_from: str | None, date_to: str | None, doctor_id: int | None, status: str | None, page: int, page_size: int) -> dict: ...
+    def get_consultation(self, clinic_id: int, consultation_id: int) -> dict | None: ...
     def list_doctors(self, clinic_id: int, search: str, active: bool | None, page: int, page_size: int) -> dict: ...
     def get_doctor(self, clinic_id: int, doctor_id: int) -> dict | None: ...
 
@@ -141,6 +143,19 @@ class MvpService:
             "terms_version": form["termos_versao"],
         }
         return self.repository.submit_anamnesis(clinic_id, patient_id, data, identity["id_usuario"] if identity else None)
+
+    def list_consultations(self, user: CurrentUser, clinic_id: int, search: str = "", date_from: str | None = None, date_to: str | None = None, doctor_id: int | None = None, status: str | None = None, page: int = 1, page_size: int = 25) -> dict:
+        identity = self.identity(user)
+        self._authorize(identity, clinic_id, "CONSULTATION_READ")
+        return self.repository.list_consultations(clinic_id, search, date_from, date_to, doctor_id, status, page, page_size)
+
+    def get_consultation(self, user: CurrentUser, clinic_id: int, consultation_id: int) -> dict:
+        identity = self.identity(user)
+        self._authorize(identity, clinic_id, "CONSULTATION_READ")
+        consultation = self.repository.get_consultation(clinic_id, consultation_id)
+        if not consultation:
+            raise BusinessError("CONSULTATION_NOT_FOUND", "Consulta não encontrada nesta clínica", 404)
+        return consultation
 
     def list_doctors(self, user: CurrentUser, clinic_id: int, search: str = "", active: bool | None = None, page: int = 1, page_size: int = 25) -> dict:
         identity = self.identity(user)

@@ -121,7 +121,36 @@ type PatientPayload = {
     parentesco: FormDataEntryValue | null;
   };
 };
-type NavigationScreen = "overview" | "patients" | "anamneses" | "team" | "doctors";
+type Consultation = {
+  id_consulta: number;
+  id_clinica: number;
+  id_paciente: number | null;
+  id_doutor: number | null;
+  nome_paciente: string | null;
+  nome_doutor: string | null;
+  especialidade: string | null;
+  data_consulta: string | null;
+  status: string | null;
+  valor_total: number | null;
+  total_itens: number;
+  soma_itens: number | null;
+  flag_paciente_localizado: boolean | null;
+  divergencia_valor: boolean;
+};
+type ConsultationResult = { items: Consultation[]; total: number; page: number; page_size: number };
+type ConsultationProcedure = {
+  id_consulta_procedimento: number;
+  nome_procedimento: string | null;
+  elemento_dental: string | null;
+  descricao: string | null;
+  valor_consulta: number | null;
+};
+type ConsultationDetail = Consultation & {
+  tipo_match_paciente: string | null;
+  nome_paciente_origem: string | null;
+  itens: ConsultationProcedure[];
+};
+type NavigationScreen = "overview" | "patients" | "anamneses" | "team" | "doctors" | "consultations";
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -159,6 +188,14 @@ export default function Home() {
   const [doctorSearch, setDoctorSearch] = useState("");
   const [doctorActiveFilter, setDoctorActiveFilter] = useState<ActiveFilter>("all");
   const [doctorDetail, setDoctorDetail] = useState<DoctorDetail | null>(null);
+  const [consultations, setConsultations] = useState<ConsultationResult>({ items: [], total: 0, page: 1, page_size: 25 });
+  const [consultationCache, setConsultationCache] = useState<Record<string, ConsultationResult>>({});
+  const [consultationPage, setConsultationPage] = useState(1);
+  const [consultationSearch, setConsultationSearch] = useState("");
+  const [consultationDateFrom, setConsultationDateFrom] = useState("");
+  const [consultationDateTo, setConsultationDateTo] = useState("");
+  const [consultationDoctorId, setConsultationDoctorId] = useState<number | null>(null);
+  const [consultationDetail, setConsultationDetail] = useState<ConsultationDetail | null>(null);
 
   useEffect(() => {
     if (window.location.pathname === "/anamnese/responder") {
@@ -359,6 +396,14 @@ export default function Home() {
     setDoctorSearch("");
     setDoctorActiveFilter("all");
     setDoctorDetail(null);
+    setConsultations({ items: [], total: 0, page: 1, page_size: 25 });
+    setConsultationCache({});
+    setConsultationPage(1);
+    setConsultationSearch("");
+    setConsultationDateFrom("");
+    setConsultationDateTo("");
+    setConsultationDoctorId(null);
+    setConsultationDetail(null);
     setScreen("login");
   }
   async function loadDoctorList(targetClinic: typeof clinic, search: string, active: ActiveFilter, page: number) {
@@ -377,6 +422,27 @@ export default function Home() {
     if (!clinic) return;
     await loadDoctorList(clinic, doctorSearch, doctorActiveFilter, doctorPage);
     setScreen("doctors");
+  }
+  async function loadConsultationList(targetClinic: typeof clinic, search: string, dateFrom: string, dateTo: string, doctorId: number | null, page: number) {
+    if (!targetClinic) return;
+    const cacheKey = `${targetClinic.id_clinica}:${search}:${dateFrom}:${dateTo}:${doctorId ?? ""}:${page}`;
+    if (consultationCache[cacheKey]) { setConsultations(consultationCache[cacheKey]); return; }
+    const params = new URLSearchParams({ search, page: String(page), page_size: "25" });
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    if (doctorId !== null) params.set("doctor_id", String(doctorId));
+    await run(
+      () => api<ConsultationResult>(`/clinicas/${targetClinic.id_clinica}/consultas?${params}`),
+      (result) => {
+        setConsultations(result);
+        setConsultationCache((prev) => ({ ...prev, [cacheKey]: result }));
+      },
+    );
+  }
+  async function openConsultations() {
+    if (!clinic) return;
+    await loadConsultationList(clinic, consultationSearch, consultationDateFrom, consultationDateTo, consultationDoctorId, consultationPage);
+    setScreen("consultations");
   }
   async function openTeam() {
     await run(
@@ -512,6 +578,10 @@ export default function Home() {
       void openDoctors();
       return;
     }
+    if (destination === "consultations") {
+      void openConsultations();
+      return;
+    }
     setTransitioning(true);
     window.setTimeout(() => {
       setScreen(destination);
@@ -539,6 +609,54 @@ export default function Home() {
         onClinics={() => setScreen("clinics")}
         onLogout={leave}
         run={run}
+      />
+    );
+  if (screen === "consultations")
+    return (
+      <ConsultasPage
+        user={user}
+        identity={identity}
+        clinic={clinic}
+        clinics={clinics}
+        result={consultations}
+        search={consultationSearch}
+        setSearch={setConsultationSearch}
+        dateFrom={consultationDateFrom}
+        setDateFrom={setConsultationDateFrom}
+        dateTo={consultationDateTo}
+        setDateTo={setConsultationDateTo}
+        doctorId={consultationDoctorId}
+        page={consultationPage}
+        detail={consultationDetail}
+        error={error}
+        loading={loading}
+        onNavigate={navigate}
+        onClinicSelect={chooseClinic}
+        onClinics={() => setScreen("clinics")}
+        onLogout={leave}
+        onSearch={() => {
+          setConsultationCache({});
+          setConsultationPage(1);
+          void loadConsultationList(clinic, consultationSearch, consultationDateFrom, consultationDateTo, consultationDoctorId, 1);
+        }}
+        onDoctorFilter={(id) => {
+          setConsultationDoctorId(id);
+          setConsultationCache({});
+          setConsultationPage(1);
+          void loadConsultationList(clinic, consultationSearch, consultationDateFrom, consultationDateTo, id, 1);
+        }}
+        onPage={(page) => {
+          setConsultationPage(page);
+          void loadConsultationList(clinic, consultationSearch, consultationDateFrom, consultationDateTo, consultationDoctorId, page);
+        }}
+        onDetail={async (id) => {
+          if (!clinic) return;
+          await run(
+            () => api<ConsultationDetail>(`/clinicas/${clinic.id_clinica}/consultas/${id}`),
+            (d) => setConsultationDetail(d),
+          );
+        }}
+        onCloseDetail={() => setConsultationDetail(null)}
       />
     );
   if (screen === "doctors")
@@ -585,7 +703,7 @@ export default function Home() {
         onCloseDetail={() => setDoctorDetail(null)}
       />
     );
-  const dashboardScreen: Exclude<NavigationScreen, "team" | "doctors"> =
+  const dashboardScreen: Exclude<NavigationScreen, "team" | "doctors" | "consultations"> =
     screen === "overview" || screen === "anamneses" ? screen : "patients";
   return (
     <Dashboard
@@ -1042,6 +1160,7 @@ function AppSidebar({
   const canReadPatients = Boolean(identity?.permissoes.includes("PATIENT_READ"));
   const canReadAnamnesis = Boolean(identity?.permissoes.includes("ANAMNESIS_READ"));
   const canReadDoctors = Boolean(identity?.permissoes.includes("DOCTOR_READ"));
+  const canReadConsultations = Boolean(identity?.permissoes.includes("CONSULTATION_READ"));
   const item = (screen: NavigationScreen, icon: string, label: string) => (
     <button
       type="button"
@@ -1083,6 +1202,7 @@ function AppSidebar({
         {canReadPatients && item("patients", "♙", "Pacientes")}
         {canReadAnamnesis && item("anamneses", "✚", "Anamneses")}
         {canReadDoctors && item("doctors", "♞", "Doutores")}
+        {canReadConsultations && item("consultations", "✦", "Consultas")}
         {canManageTeam && item("team", "♧", "Equipe")}
       </nav>
       {identity?.permissoes.includes("CLINIC_MANAGE") && (
@@ -1448,7 +1568,7 @@ function TemporaryPassword({
 }
 
 function Dashboard(props: {
-  view: Exclude<NavigationScreen, "team" | "doctors">;
+  view: Exclude<NavigationScreen, "team" | "doctors" | "consultations">;
   user: User | null;
   identity: Identity | null;
   clinic: Clinic | null;
@@ -2294,6 +2414,224 @@ function RemoteAnamnesis({ token }: { token: string }) {
         }
       }}
     />
+  );
+}
+function ConsultasPage({
+  user,
+  identity,
+  clinic,
+  clinics,
+  result,
+  search,
+  setSearch,
+  dateFrom,
+  setDateFrom,
+  dateTo,
+  setDateTo,
+  doctorId,
+  page,
+  detail,
+  error,
+  loading,
+  onNavigate,
+  onClinicSelect,
+  onClinics,
+  onLogout,
+  onSearch,
+  onDoctorFilter,
+  onPage,
+  onDetail,
+  onCloseDetail,
+}: {
+  user: User | null;
+  identity: Identity | null;
+  clinic: Clinic | null;
+  clinics: Clinic[];
+  result: ConsultationResult;
+  search: string;
+  setSearch: (s: string) => void;
+  dateFrom: string;
+  setDateFrom: (s: string) => void;
+  dateTo: string;
+  setDateTo: (s: string) => void;
+  doctorId: number | null;
+  page: number;
+  detail: ConsultationDetail | null;
+  error: string;
+  loading: boolean;
+  onNavigate: (screen: NavigationScreen) => void;
+  onClinicSelect: (clinic: Clinic) => void;
+  onClinics: () => void;
+  onLogout: () => void;
+  onSearch: () => void;
+  onDoctorFilter: (id: number | null) => void;
+  onPage: (page: number) => void;
+  onDetail: (id: number) => void;
+  onCloseDetail: () => void;
+}) {
+  const pages = Math.max(1, Math.ceil(result.total / result.page_size));
+  const fmtCurrency = (v: number | null) =>
+    v == null ? "—" : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const fmtDate = (s: string | null) =>
+    s ? new Date(s + "T00:00:00").toLocaleDateString("pt-BR") : "—";
+  return (
+    <main className="app-shell">
+      <BusyOverlay visible={loading} message="Carregando" />
+      <AppSidebar current="consultations" identity={identity} clinic={clinic} clinics={clinics} onNavigate={onNavigate} onClinicSelect={onClinicSelect} onClinics={onClinics} />
+      <section className="workspace">
+        <header className="topbar">
+          <div className="topbar-context">
+            <small>Atendimentos</small>
+            <strong>{clinic?.nome}</strong>
+          </div>
+          <div className="topbar-user">
+            <strong>{user?.email}</strong>
+            <button className="logout-button" onClick={onLogout}>Sair</button>
+          </div>
+        </header>
+        <main className="main-content">
+          <div className="content">
+            <div className="title-row">
+              <div>
+                <p className="eyebrow">ATENDIMENTOS</p>
+                <h1>Consultas</h1>
+                <p className="subtitle">Histórico de atendimentos desta clínica — somente leitura.</p>
+              </div>
+            </div>
+            {error && <div className="error-box" role="alert">{error}</div>}
+            <div className="directory-tools">
+              <form className="panel-toolbar" onSubmit={(e) => { e.preventDefault(); onSearch(); }}>
+                <label>
+                  <span className="sr-only">Buscar paciente</span>
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por paciente" />
+                </label>
+                <label>
+                  <span className="sr-only">De</span>
+                  <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="Data início" />
+                </label>
+                <label>
+                  <span className="sr-only">Até</span>
+                  <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="Data fim" />
+                </label>
+                <button className="filter-button">Buscar</button>
+              </form>
+            </div>
+            <div className="directory-summary">
+              <strong>{result.total}</strong> consulta(s) encontrada(s)
+              <span>Página {result.page} de {pages}</span>
+            </div>
+            <div className="table-head" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr 1fr" }}>
+              <span>Paciente</span>
+              <span>Doutor</span>
+              <span>Data</span>
+              <span>Status</span>
+              <span>Valor</span>
+              <span>Qualidade</span>
+              <span>Ação</span>
+            </div>
+            {result.items.length === 0 && !loading ? (
+              <div className="empty-state">
+                <strong>Nenhuma consulta encontrada</strong>
+                <span>Ajuste os filtros ou verifique o período selecionado.</span>
+              </div>
+            ) : (
+              result.items.map((c) => (
+                <article className={`patient-row${c.divergencia_valor ? " warn" : ""}`} key={c.id_consulta}>
+                  <div className="patient-name">
+                    <span className="patient-avatar">{initials(c.nome_paciente || "?")}</span>
+                    <div>
+                      <strong>{c.nome_paciente || "Paciente não localizado"}</strong>
+                      {!c.flag_paciente_localizado && <small className="tag danger">Sem vínculo</small>}
+                    </div>
+                  </div>
+                  <span>{c.nome_doutor || "—"}</span>
+                  <span>{fmtDate(c.data_consulta)}</span>
+                  <span className="status ok">{c.status || "—"}</span>
+                  <div>
+                    <span>{fmtCurrency(c.valor_total)}</span>
+                    {c.divergencia_valor && <small className="tag warn">Divergência</small>}
+                  </div>
+                  <span>{c.total_itens} item(s)</span>
+                  <div className="row-actions">
+                    <button onClick={() => onDetail(c.id_consulta)}>Ver</button>
+                  </div>
+                </article>
+              ))
+            )}
+            <div className="pagination">
+              <button disabled={result.page <= 1} onClick={() => onPage(result.page - 1)}>← Anterior</button>
+              <span>Página {result.page} de {pages}</span>
+              <button disabled={result.page >= pages} onClick={() => onPage(result.page + 1)}>Próxima →</button>
+            </div>
+          </div>
+        </main>
+        <footer className="footer">Billing Control • Gestão odontológica segura</footer>
+      </section>
+      {detail && (
+        <div className="modal-backdrop">
+          <section className="modal profile-modal">
+            <div className="modal-head">
+              <div>
+                <p className="eyebrow">CONSULTA #{detail.id_consulta}</p>
+                <h2>{detail.nome_paciente || detail.nome_paciente_origem || "Paciente não localizado"}</h2>
+              </div>
+              <button onClick={onCloseDetail}>×</button>
+            </div>
+            <div className="profile-status">
+              <span className="status ok">{detail.status}</span>
+              {detail.divergencia_valor && <span className="tag warn">Divergência de valores</span>}
+              {!detail.flag_paciente_localizado && <span className="tag danger">Paciente sem vínculo</span>}
+            </div>
+            <div className="profile-columns">
+              <section>
+                <h3>Atendimento</h3>
+                <dl>
+                  <dt>Data</dt>
+                  <dd>{fmtDate(detail.data_consulta)}</dd>
+                  <dt>Doutor</dt>
+                  <dd>{detail.nome_doutor || "—"}{detail.especialidade ? ` — ${detail.especialidade}` : ""}</dd>
+                  <dt>Valor cabeçalho</dt>
+                  <dd>{fmtCurrency(detail.valor_total)}</dd>
+                  <dt>Soma dos itens</dt>
+                  <dd className={detail.divergencia_valor ? "warn-text" : ""}>{fmtCurrency(detail.soma_itens)}</dd>
+                </dl>
+              </section>
+              <section>
+                <h3>Qualidade de vínculo</h3>
+                <dl>
+                  <dt>Paciente localizado</dt>
+                  <dd>{detail.flag_paciente_localizado ? "Sim" : "Não"}</dd>
+                  {detail.tipo_match_paciente && <><dt>Tipo de match</dt><dd>{detail.tipo_match_paciente}</dd></>}
+                  {detail.nome_paciente_origem && <><dt>Nome de origem</dt><dd>{detail.nome_paciente_origem}</dd></>}
+                </dl>
+              </section>
+            </div>
+            {detail.itens.length > 0 && (
+              <section style={{ marginTop: "1rem" }}>
+                <h3>Procedimentos ({detail.itens.length})</h3>
+                <div className="table-head" style={{ gridTemplateColumns: "2fr 1fr 2fr 1fr" }}>
+                  <span>Procedimento</span>
+                  <span>Dente</span>
+                  <span>Descrição</span>
+                  <span>Valor</span>
+                </div>
+                {detail.itens.map((item) => (
+                  <div className="patient-row" key={item.id_consulta_procedimento} style={{ gridTemplateColumns: "2fr 1fr 2fr 1fr" }}>
+                    <span>{item.nome_procedimento || "—"}</span>
+                    <span>{item.elemento_dental || "—"}</span>
+                    <span>{item.descricao || "—"}</span>
+                    <span>{fmtCurrency(item.valor_consulta)}</span>
+                  </div>
+                ))}
+              </section>
+            )}
+            <div className="modal-actions">
+              <button className="primary-button" onClick={onCloseDetail}>Fechar</button>
+            </div>
+          </section>
+        </div>
+      )}
+    </main>
   );
 }
 function DoctorsPage({
