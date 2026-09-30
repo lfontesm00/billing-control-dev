@@ -247,3 +247,98 @@ class ProfileResponse(ApiModel):
     guardian: dict[str, Any] | None = None
     anamnesis_status: str
     alerts: list[dict[str, Any]]
+
+
+class DoctorListItem(ApiModel):
+    id_doutor: int
+    id_doutor_clinica: int | None = None
+    nome_doutor: str
+    especialidade: str | None = None
+    cro: str | None = None
+    cro_estado: str | None = None
+    percentual_repasse: float | None = None
+    flag_ativo: bool = True
+    total_consultas: int = 0
+
+
+class PaginatedDoctors(ApiModel):
+    items: list[DoctorListItem]
+    page: int
+    page_size: int
+    total: int
+
+
+class DoctorDetail(DoctorListItem):
+    id_clinica: int
+    data_inicio: datetime | None = None
+    data_fim: date | None = None
+
+
+class ConsultationProcedure(ApiModel):
+    id_consulta_procedimento: int
+    nome_procedimento: str | None = None
+    elemento_dental: str | None = None
+    descricao: str | None = None
+    valor_consulta: float | None = None
+
+
+class ConsultationListItem(ApiModel):
+    id_consulta: int
+    id_clinica: int
+    id_paciente: int | None = None
+    id_doutor: int | None = None
+    nome_paciente: str | None = None
+    nome_doutor: str | None = None
+    especialidade: str | None = None
+    data_consulta: date | None = None
+    status: str | None = None
+    valor_total: float | None = None
+    total_itens: int = 0
+    soma_itens: float | None = None
+    flag_paciente_localizado: bool | None = None
+    divergencia_valor: bool = False
+
+
+class PaginatedConsultations(ApiModel):
+    items: list[ConsultationListItem]
+    page: int
+    page_size: int
+    total: int
+
+
+class ConsultationDetail(ConsultationListItem):
+    tipo_match_paciente: str | None = None
+    nome_paciente_origem: str | None = None
+    itens: list[ConsultationProcedure] = []
+
+
+class ExpenseListItem(ApiModel):
+    id_despesa: int
+    id_clinica: int
+    nome_despesa: str | None = None
+    prestador: str | None = None
+    data_vencimento: date | None = None
+    mes_ano: str | None = None
+    status: str | None = None
+    valor_despesa: float | None = None
+    data_pagamento: date | None = None
+
+
+class PaginatedExpenses(ApiModel):
+    items: list[ExpenseListItem]
+    page: int
+    page_size: int
+    total: int
+
+
+class FinancialSummary(ApiModel):
+    producao_estimada: float
+    total_despesas: float
+    resultado_estimado: float
+    total_consultas: int
+    total_despesas_count: int
+    aviso: str = (
+        "Resultado operacional estimado. "
+        "Producao reflete valor_total de consultas finalizadas, "
+        "nao confirma recebimento. Despesas incluem todos os registros do periodo."
+    )
