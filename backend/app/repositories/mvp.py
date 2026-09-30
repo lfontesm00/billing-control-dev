@@ -789,8 +789,8 @@ class BigQueryMvpRepository:
             GROUP BY id_consulta, id_clinica
           ),
           itens_list AS (
-            SELECT id_consulta_procedimento, COALESCE(nome_procedimento_tratado, nome_procedimento_original) nome_procedimento,
-              elemento_dental, descricao, valor_consulta
+            SELECT id_consulta_procedimento, COALESCE(procedimento_tratado, procedimento_origem) nome_procedimento,
+              elemento AS elemento_dental, descricao, valor_consulta
             FROM {self._trusted('consulta_procedimentos')}
             WHERE id_clinica = @clinic AND id_consulta = @consultation
             QUALIFY ROW_NUMBER() OVER(PARTITION BY id_consulta_procedimento ORDER BY updated_at DESC, created_at DESC) = 1
