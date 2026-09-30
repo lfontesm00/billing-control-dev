@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, status
 
 from app.config import settings
 from app.core import BusinessError, CurrentUser, create_firebase_user, delete_firebase_user, get_current_user, reset_firebase_password
-from app.models.mvp import AnamnesisSubmit, ClinicCreate, InviteCreate, OrganizationCreate, PasswordChange, PatientCreate, PatientSessionCreate, ProfessionalApproval, RemoteIdentityVerify, RemotePatientSessionCreate, TeamMemberCreate, TeamMemberUpdate
+from app.models.mvp import AnamnesisSubmit, ClinicCreate, InviteCreate, OrganizationCreate, PasswordChange, PatientCreate, PatientSessionCreate, ProfessionalApproval, RemoteIdentityVerify, RemotePatientSessionCreate, TeamMemberCreate, TeamMemberUpdate, PaginatedDoctors, DoctorDetail
 from app.services.mvp import anamnesis_status, form_is_available
 from app.repositories.mvp import BigQueryMvpRepository
 from app.services.mvp import MvpService
@@ -340,3 +340,14 @@ def submit_patient_anamnesis(payload: AnamnesisSubmit, request:Request, context:
     result = svc.submit_anamnesis(None, session["id_clinica"], session["id_paciente"], payload, patient_session=True,form_id=session.get("id_formulario"))
     if session.get("tipo_sessao")=="REMOTE": return repo.finalize_remote_submission(token,session,result,payload.model_dump(mode="json"),*request_evidence(request))
     repo.consume_patient_session(token);return result
+
+
+@router.get("/clinicas/{clinic_id}/doutores", response_model=PaginatedDoctors, tags=["doutores"])
+def list_doctors(clinic_id: int, search: str = Query(default=""), ativo: str = Query(default="all"), page: int = Query(default=1, ge=1), page_size: int = Query(default=25, ge=1, le=100), user: CurrentUser = Depends(get_current_user), svc: MvpService = Depends(service)):
+    active: bool | None = None if ativo == "all" else ativo == "true"
+    return svc.list_doctors(user, clinic_id, search, active, page, page_size)
+
+
+@router.get("/clinicas/{clinic_id}/doutores/{doctor_id}", response_model=DoctorDetail, tags=["doutores"])
+def get_doctor(clinic_id: int, doctor_id: int, user: CurrentUser = Depends(get_current_user), svc: MvpService = Depends(service)):
+    return svc.get_doctor(user, clinic_id, doctor_id)

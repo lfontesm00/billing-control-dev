@@ -247,3 +247,28 @@ class ProfileResponse(ApiModel):
     guardian: dict[str, Any] | None = None
     anamnesis_status: str
     alerts: list[dict[str, Any]]
+
+
+class DoctorListItem(ApiModel):
+    id_doutor: int
+    id_doutor_clinica: int | None = None
+    nome_doutor: str
+    especialidade: str | None = None
+    cro: str | None = None
+    cro_estado: str | None = None
+    percentual_repasse: float | None = None
+    flag_ativo: bool = True
+    total_consultas: int = 0
+
+
+class PaginatedDoctors(ApiModel):
+    items: list[DoctorListItem]
+    page: int
+    page_size: int
+    total: int
+
+
+class DoctorDetail(DoctorListItem):
+    id_clinica: int
+    data_inicio: datetime | None = None
+    data_fim: date | None = None

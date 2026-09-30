@@ -631,6 +631,72 @@ class BigQueryMvpRepository:
         digest = hashlib.sha256(raw.encode()).hexdigest()
         self._query(f"UPDATE {self._bc('sessoes_paciente')} SET revogada_em=CURRENT_TIMESTAMP() WHERE token_hash=@hash AND NOT usada AND revogada_em IS NULL", self._params(hash=("STRING", digest)))
 
+    def list_doctors(self, clinic_id: int, search: str = "", active: bool | None = None, page: int = 1, page_size: int = 25) -> dict:
+        active_sql = "" if active is None else "AND COALESCE(dc.flag_ativo, d.flag_ativo, TRUE) = @active"
+        params = self._params(clinic=("INT64", clinic_id), search=("STRING", search), limit=("INT64", page_size), offset=("INT64", (page - 1) * page_size))
+        if active is not None:
+            params.append(bigquery.ScalarQueryParameter("active", "BOOL", active))
+        result = self._one(self._query(f"""
+          WITH doctors AS (
+            SELECT * FROM {self._trusted('doutores')}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_doutor ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          links AS (
+            SELECT * FROM {self._trusted('doutor_clinica')}
+            WHERE id_clinica = @clinic
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_doutor ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          counts AS (
+            SELECT id_doutor, COUNT(*) total_consultas
+            FROM {self._trusted('consultas')}
+            WHERE id_clinica = @clinic AND id_doutor IS NOT NULL
+            GROUP BY id_doutor
+          ),
+          base AS (
+            SELECT
+              d.id_doutor, dc.id_doutor_clinica, d.nome_doutor,
+              d.especialidade, d.cro, d.cro_estado, d.percentual_repasse,
+              COALESCE(dc.flag_ativo, d.flag_ativo, TRUE) flag_ativo,
+              COALESCE(c.total_consultas, 0) total_consultas
+            FROM doctors d
+            JOIN links dc USING(id_doutor)
+            LEFT JOIN counts c USING(id_doutor)
+            WHERE (@search = '' OR CONTAINS_SUBSTR(LOWER(d.nome_doutor), LOWER(@search)))
+            {active_sql}
+          )
+          SELECT
+            (SELECT COUNT(*) FROM base) total,
+            ARRAY(SELECT AS STRUCT id_doutor, id_doutor_clinica, nome_doutor, especialidade, cro, cro_estado, percentual_repasse, flag_ativo, total_consultas FROM base ORDER BY nome_doutor LIMIT @limit OFFSET @offset) items
+        """, params))
+        if not result:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        rows = [dict(row.items()) if hasattr(row, "items") else dict(row) for row in (result.get("items") or [])]
+        return {"items": rows, "total": int(result.get("total") or 0), "page": page, "page_size": page_size}
+
+    def get_doctor(self, clinic_id: int, doctor_id: int) -> dict | None:
+        return self._one(self._query(f"""
+          WITH doctors AS (
+            SELECT * FROM {self._trusted('doutores')}
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_doutor ORDER BY updated_at DESC, created_at DESC) = 1
+          ),
+          links AS (
+            SELECT * FROM {self._trusted('doutor_clinica')}
+            WHERE id_clinica = @clinic
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY id_doutor ORDER BY updated_at DESC, created_at DESC) = 1
+          )
+          SELECT
+            d.id_doutor, dc.id_doutor_clinica, @clinic AS id_clinica, d.nome_doutor,
+            d.especialidade, d.cro, d.cro_estado, d.percentual_repasse,
+            COALESCE(dc.flag_ativo, d.flag_ativo, TRUE) flag_ativo,
+            CAST(dc.data_inicio AS DATETIME) data_inicio,
+            dc.data_fim,
+            (SELECT COUNT(*) FROM {self._trusted('consultas')} WHERE id_clinica = @clinic AND id_doutor = d.id_doutor) total_consultas
+          FROM doctors d
+          JOIN links dc USING(id_doutor)
+          WHERE d.id_doutor = @doctor
+          LIMIT 1
+        """, self._params(clinic=("INT64", clinic_id), doctor=("INT64", doctor_id))))
+
     def audit(self, actor_id, organization_id, clinic_id, action, entity, entity_id):
         audit = self._unique_id(self._bc("auditoria"), "id_auditoria")
         self._query(f"INSERT INTO {self._bc('auditoria')} VALUES (@id,@actor,@org,@clinic,@action,@entity,@entity_id,CURRENT_TIMESTAMP())", self._params(id=("INT64", audit), actor=("INT64", actor_id), org=("INT64", organization_id), clinic=("INT64", clinic_id), action=("STRING", action), entity=("STRING", entity), entity_id=("INT64", entity_id)))
